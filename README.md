@@ -3,7 +3,7 @@ Check for changes on list of urls of career pages (or just pages in general)
 
 ## Installation
 1. clone and cd into the directory
-1. todo
+1. `npm install`
 
 ## Configuration
 1. Update the list of urls in the `urls.txt` file. One url per line.
