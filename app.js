@@ -3,8 +3,8 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const jsdiff = require('diff');
 
-const getUrls = async fn => {
-    let urls = await fs.promises.readFile(fn, {encoding: 'utf-8'});
+const getUrls = async filepath => {
+    let urls = await fs.promises.readFile(filepath, {encoding: 'utf-8'});
     urls = urls.split("\n");
     return urls;
 };
@@ -17,9 +17,9 @@ async function getSavedData(url) {
     return text;
 }
 
-let user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) ' +
+const user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) ' +
     'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36';
-let headers = {'User-Agent': user_agent, "Content-Type": "text/html"};
+const headers = {'User-Agent': user_agent, "Content-Type": "text/html"};
 
 const getSiteText = async (url) => {
     try {
@@ -34,51 +34,68 @@ const getSiteText = async (url) => {
 };
 
 const updateData = async (json) => {
-    let data = JSON.stringify(json);
+    const data = JSON.stringify(json);
     await fs.promises.writeFile('./jobs.json', data, {encoding: 'utf-8'});
 };
 
-global.new_json = {};
-global.diff_count = 0;
 const checkSite = async (url) => {
-    let new_text = await getSiteText(url);
-    let old_text = await getSavedData(url);
-    new_json[url] = new_text;
+    const new_text = await getSiteText(url);
+    const old_text = await getSavedData(url);
+
+    let site_info = {
+        url: url,
+        new_text: new_text,
+        changed: false,
+        added: null,
+        removed: null,
+    };
 
     // compare
     if ((new_text && old_text) && (new_text !== old_text)) {
-        diff_count++;
-        let diff = jsdiff.diffTrimmedLines(old_text, new_text);
-        let diff_report = `### ${url} ###`;
-        diff.forEach((d) => {
-            if (d.added) {
-                diff_report += "\nAdded:\n";
-                diff_report += d.value;
-            } else if (d.removed) {
-                diff_report += "\nRemoved:\n";
-                diff_report += d.value;
-            }
-        });
-        console.log(diff_report);
-        return diff;
+        site_info.changed = true;
+
+        const diff = jsdiff.diffTrimmedLines(old_text, new_text);
+
+        site_info.added = diff.filter(d => d.added).map( d => d.value);
+        site_info.removed = diff.filter(d => d.removed).map( d => d.value);
     }
 
-    // save site_text to json
-    return null;
+    return site_info;
+};
+
+const log_results = (site) => {
+    if( site.added || site.removed ) console.log(`### ${site.url} ###`);
+    if (site.added) {
+        console.log('Added:');
+        site.added.forEach(a => console.log(a));
+    }
+    if (site.removed) {
+        console.log('Removed:');
+        site.removed.forEach(r => console.log(r));
+    }
 };
 
 async function checkSites() {
     const urls = await getUrls('./urls.txt');
 
-    await Promise.all(urls.map(async (url) => {
-        await checkSite(url);
+    let sites = await Promise.all(urls.map(async (url) => {
+        return await checkSite(url);
     }));
 
+    sites.forEach(log_results);
+
+    const changed = sites.reduce( (c, site) => {return site.changed ? c + 1: c }, 0);
+
+    // print stats
     console.log("done checking sites.");
     console.log(`  total urls: ${urls.length}`);
-    console.log(`  urls checked: ${Object.keys(new_json).length}`);
-    console.log(`  total changed: ${diff_count}`);
-    await updateData(new_json);
+    console.log(`  urls checked: ${Object.keys(sites).length}`);
+    console.log(`  total changed: ${changed}`);
+
+    // save the new data
+    let new_data = {};
+    sites.map(site => new_data[site.url] = site.new_text)
+    await updateData(new_data);
 }
 
 checkSites();
